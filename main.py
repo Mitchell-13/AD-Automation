@@ -31,14 +31,19 @@ def replace_special_characters(text):
     text = re.sub(r'[\n\r\t]', ' ', text)
     text = re.sub(r' +', ' ', text)
     return text
-
+#load cookies on program start
+try:
+    cookies = bc.edge(domains=["spiceworks.com"])
+except:
+    messageBox.showerror("Error",f"Could not load cookies from Edge. Clear cookies and login to spiceworks on Edge.")
+    exit()
+cookie = bc.to_cookiejar(cookies)
 # Function to scrape tickets
 def get_ticket_details(ticketNumber):
-    url = f'https://on.spiceworks.com/api/tickets/{ticketNumber}'
+    url = f'https://provocity.on.spiceworks.com/api/tickets/{ticketNumber}'
     # Load cookies to authenticate to spiceworks
-    cookies = bc.edge()
-    cookie = bc.to_cookiejar(cookies)
-    response = requests.get(url, cookies=cookie)
+    response = requests.get(url, cookies=cookie, verify="cert.pem")
+    logging.info(f"API response: \n\n{response.text}")
     data = json.loads(response.text)
     rawtext=data["ticket"]["description"]
     text = replace_special_characters(rawtext)
@@ -84,6 +89,7 @@ def get_ticket_details(ticketNumber):
             return result
         else:
             messageBox.showerror("Error",f"No Ticket found for #{ticketNumber}")
+            logging.error(f"No tickets found for {ticketNumber}")
             return None
 
 # Function to start thread (to keep program responsive)
@@ -113,6 +119,7 @@ def get_department(user):
                         where_clause=f"cn='{user}'")
     except:
         messageBox.showerror("Error",f"Could not find a valid department for {user}")
+        logging.error(f"Could not find a valid department for {user}")
         return None
     # Handle exception of multiple users found with given name
     else:
@@ -126,6 +133,7 @@ def get_department(user):
                                     where_clause=f"cn='{actualName}'")
                 except Exception as e:
                     print(f"Error: {str(e)}")
+                    logging.error(str(e))
                     return None
                 if q.get_row_count() == 1:
                     break 
@@ -186,82 +194,90 @@ def update_ad_record():
     ticketNumber = entry_ticket_number.get()
     email_status = needs_email_var.get()
     part_time = part_time_var.get()
-    
-    #check if a ticket number was entered
-    if not ticketNumber:
-        messageBox.showerror("Error","Please provide a ticket number")
-        return
-
-    # Get user information from ticket details
-    userInfo = get_ticket_details(ticketNumber)
-    if userInfo is None: return
-    employeeName, employeeId, position, supervisor = userInfo
-
-    if supervisor in supervisors:
-        supervisor = supervisors[supervisor]
-
-    # Get department and manager dn from supervisor
-    department = get_department(supervisor) 
-    if department is None: return
-    departmentName, manager_dn = department
-
-    # Find the user in Active Directory
-    user = get_user_from_id(employeeId)
-    if user is None: return
-    user_dn, email = user
-        
-    # Update user attributes
-    userObj = aduser.ADUser.from_dn(user_dn)
-    logonCount = userObj.get_attribute("logonCount")
-    attributes={"title":position,"department":departmentName,"manager":manager_dn}
-
-    # Add police groups
-    if position == "Police Officer I":
-        for groupCN in police_groups:
-            groupObj = adgroup.ADGroup.from_cn(groupCN)
-            userObj.add_to_group(groupObj)
-
-    #set email attributes
-    if email_status == 1:
-        set_email(email, userObj)
-
-    #move to PT OU if part-time
-    if part_time == 1:
-        departmentOU = pt_departments_dict[departmentName]
-    else:
-        departmentOU = departments_dict[departmentName]
-        deptGroupObj=adgroup.ADGroup.from_cn(groups_dict[departmentName])
-        try:
-            userObj.add_to_group(deptGroupObj)
-        except:
-            messageBox.showerror("Error","Error adding user to department group")
-
-    userObj.update_attributes(attributes)
-    try: userObj.move(adcontainer.ADContainer.from_dn(departmentOU))
-    except: pass
-    
-    # Enable user account if disabled
-    userObj.enable()
     try:
-        if pyadutils.convert_datetime(userObj.get_attribute("accountExpires")[0]):
-            messageBox.showerror("Error", "User has an expiration\nThis needs to be manually removed")
-    except: pass
-    
-    copytext = f"The account for {employeeName} has been created with the username '{email}', please contact the IS Helpdesk at ext.6560 for the account password."
-    
-    #check if user has existing account
-    if len(logonCount) == 0 or logonCount[0] == 0:
-        password = config.get('default_pass', '')
-        userObj.set_password(password)
-        userObj.force_pwd_change_on_login()
-        messageBox.showinfo("Result",f"User {employeeName} has been updated\nDepartment: {departmentName}\nPosition: {position}\nManager: {supervisor}\n\nRemember to Create P-Drive folder if needed")
-        clipboard.copy(copytext)
-    else:
-        # Prevent password being reset on active accounts
-        messageBox.showinfo("Result",f"User may have an active account, password has not been reset\nUser {employeeName} has been updated\nDepartment: {departmentName}\nPosition: {position}\nManager: {supervisor}\n\nRemember to Create P-Drive folder if needed")
-        clipboard.copy(copytext)
+        #check if a ticket number was entered
+        if not ticketNumber:
+            messageBox.showerror("Error","Please provide a ticket number")
+            return
 
-    logging.info(f"{getpass.getuser()} updated User: {employeeName}. Department: {departmentName} Position: {position} Manager: {supervisor}")
+        # Get user information from ticket details
+        logging.info("getting ticket details")
+        userInfo = get_ticket_details(ticketNumber)
+        if userInfo is None: return
+        employeeName, employeeId, position, supervisor = userInfo
+
+        if supervisor in supervisors:
+            supervisor = supervisors[supervisor]
+
+        # Get department and manager dn from supervisor
+        logging.info("getting department")
+        department = get_department(supervisor) 
+        if department is None: return
+        departmentName, manager_dn = department
+
+        # Find the user in Active Directory
+        logging.info(f"getting user from {employeeId}")
+        user = get_user_from_id(employeeId)
+        if user is None: return
+        user_dn, email = user
+            
+        # Update user attributes
+        userObj = aduser.ADUser.from_dn(user_dn)
+        logonCount = userObj.get_attribute("logonCount")
+        attributes={"title":position,"department":departmentName,"manager":manager_dn}
+
+        # Add police groups
+        if position == "Police Officer I":
+            for groupCN in police_groups:
+                groupObj = adgroup.ADGroup.from_cn(groupCN)
+                userObj.add_to_group(groupObj)
+
+        #set email attributes
+        if email_status == 1:
+            set_email(email, userObj)
+
+        #move to PT OU if part-time
+        if part_time == 1:
+            departmentOU = pt_departments_dict[departmentName]
+        else:
+            departmentOU = departments_dict[departmentName]
+            deptGroupObj=adgroup.ADGroup.from_cn(groups_dict[departmentName])
+            try:
+                userObj.add_to_group(deptGroupObj)
+            except:
+                messageBox.showerror("Error","Error adding user to department group")
+
+        userObj.update_attributes(attributes)
+        try: userObj.move(adcontainer.ADContainer.from_dn(departmentOU))
+        except: pass
+        
+        # Enable user account if disabled
+        userObj.enable()
+        try:
+            if pyadutils.convert_datetime(userObj.get_attribute("accountExpires")[0]):
+                messageBox.showerror("Error", "User has an expiration\nThis needs to be manually removed")
+        except: pass
+        
+        copytext = f"The account for {employeeName} has been created with the username '{email}', please contact the IS Helpdesk at ext.6560 for the account password."
+    
+
+        #check if user has existing account
+        if len(logonCount) == 0 or logonCount[0] == 0:
+            password = config.get('default_pass', '')
+            userObj.set_password(password)
+            userObj.force_pwd_change_on_login()
+            messageBox.showinfo("Result",f"User {employeeName} has been updated\nDepartment: {departmentName}\nPosition: {position}\nManager: {supervisor}\n\nRemember to Create P-Drive folder if needed")
+            clipboard.copy(copytext)
+        else:
+            # Prevent password being reset on active accounts
+            messageBox.showinfo("Result",f"User may have an active account, password has not been reset\nUser {employeeName} has been updated\nDepartment: {departmentName}\nPosition: {position}\nManager: {supervisor}\n\nRemember to Create P-Drive folder if needed")
+            clipboard.copy(copytext)
+
+        logging.info(f"{getpass.getuser()} updated User: {employeeName}. Department: {departmentName} Position: {position} Manager: {supervisor}")
+    
+    except Exception as e:
+        logging.error(e)
+        messageBox.showerror("error",f"Error: {e}")
 
     pythoncom.CoUninitialize()
 

@@ -1,6 +1,7 @@
 recent.log
 settings.json
-
+*.cer
+*.pem
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
