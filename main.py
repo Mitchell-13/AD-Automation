@@ -31,15 +31,16 @@ def replace_special_characters(text):
     text = re.sub(r'[\n\r\t]', ' ', text)
     text = re.sub(r' +', ' ', text)
     return text
-#load cookies on program start
-try:
-    cookies = bc.edge(domains=["spiceworks.com"])
-except:
-    messageBox.showerror("Error",f"Could not load cookies from Edge. Clear cookies and login to spiceworks on Edge.")
-    exit()
-cookie = bc.to_cookiejar(cookies)
+
 # Function to scrape tickets
 def get_ticket_details(ticketNumber):
+    try:
+        cookies = bc.edge(domains=["spiceworks.com"])
+        cookie = bc.to_cookiejar(cookies)
+    except:
+        messageBox.showerror("Error",f"Could not load cookies from Edge. Clear cookies and login to spiceworks on Edge.")
+        exit()
+    
     url = f'https://provocity.on.spiceworks.com/api/tickets/{ticketNumber}'
     # Load cookies to authenticate to spiceworks
     response = requests.get(url, cookies=cookie, verify="cert.pem")
