@@ -34,21 +34,44 @@ def replace_special_characters(text):
 
 # Function to scrape tickets
 def get_ticket_details(ticketNumber):
+
+    # Load cookies from Edge
     try:
         cookies = bc.edge(domains=["spiceworks.com"])
         cookie = bc.to_cookiejar(cookies)
     except:
-        messageBox.showerror("Error",f"Could not load cookies from Edge. Clear cookies and login to spiceworks on Edge.")
+        messageBox.showerror("Error",f"Could not load cookies from Edge. Clear cookies and login to spiceworks on Edge or Chrome.")
         exit()
     
     url = f'https://provocity.on.spiceworks.com/api/tickets/{ticketNumber}'
+
     # Load cookies to authenticate to spiceworks
     response = requests.get(url, cookies=cookie, verify="cert.pem")
-    logging.info(f"API response: \n\n{response.text}")
-    data = json.loads(response.text)
+    try:
+        data = json.loads(response.text)
+    except ValueError:
+        #if no JSON was returned, try again with Chrome cookies
+        try:
+            # load chrome cookies
+            try:
+                cookies = bc.chrome(domains=["spiceworks.com"])
+                cookie = bc.to_cookiejar(cookies)
+            except:
+                messageBox.showerror("Error",f"Could not load cookies from Chrome. Clear cookies and login to spiceworks on Edge or Chrome.")
+                exit()
+            # make request and try to parse JSON
+            response = requests.get(url, cookies=cookie, verify="cert.pem")
+            data = json.loads(response.text)
+        except ValueError as e:
+            logging.error(f"Could not parse API response. Likely did not return correct JSON format. More info: {e}")
+            messageBox.showerror("API Error", "Spiceworks API did not provide correct JSON data")
+            exit()
+
+    # Get ticket body from JSON response
     rawtext=data["ticket"]["description"]
     text = replace_special_characters(rawtext)
 
+    # Verify the ticket was a New Hire ticket and set variables
     if data["ticket"]["summary"] != "Employee Hire" or "Full-Time Employee Hire":
         employee_pattern = r"Employee: (.+?) - (\d+)"
         position_pattern = r"Position: P-\d*(?:\w*) (.*?)(?=\s\(|\s-\s)"
@@ -115,6 +138,7 @@ def check_thread(thread):
 def get_department(user):
     q = adquery.ADQuery()
 
+    # Get department DN and username from common name
     try:
         q.execute_query(attributes=["department", "distinguishedName","sAMAccountName"],
                         where_clause=f"cn='{user}'")
@@ -122,25 +146,28 @@ def get_department(user):
         messageBox.showerror("Error",f"Could not find a valid department for {user}")
         logging.error(f"Could not find a valid department for {user}")
         return None
-    # Handle exception of multiple users found with given name
     else:
+        #If no users are returned, promt for correct spelling of the manager's name
         if q.get_row_count() == 0:
             while True:
                 actualName = createManModal(user)
                 if actualName is None:
                     return None
                 try:
+                    # Try query again with the correct name
                     q.execute_query(attributes=["department", "distinguishedName", "sAMAccountName"],
                                     where_clause=f"cn='{actualName}'")
                 except Exception as e:
-                    print(f"Error: {str(e)}")
+                    messageBox.showerror(f"Error: {str(e)}")
                     logging.error(str(e))
                     return None
                 if q.get_row_count() == 1:
                     break 
+        # If 1 user is returned, assign fields to variables
         if q.get_row_count() == 1:
             departmentName=q.get_single_result()["department"]
             supervisor_dn=q.get_single_result()['distinguishedName']
+        # If more than 1 user is found, promt for correct one
         if q.get_row_count() > 1:
             all = q.get_all_results()
             all_usernames = [item['sAMAccountName'] for item in all]
@@ -158,6 +185,7 @@ def get_department(user):
 # Function to find a user from an employee ID
 def get_user_from_id(employeeId):
         q = adquery.ADQuery()
+        # Query for DN and username from employee ID
         try:
             q.execute_query(attributes=["distinguishedName","sAMAccountName"],
                             where_clause=f"employeeID='{employeeId}'")
@@ -179,19 +207,24 @@ def get_user_from_id(employeeId):
 
 # function to set email proxies correctly in AD
 def set_email(email, userObject):
+    # assign proxies to variable
     email_proxies=[f"SMTP:{email}@provo.org",f"smtp:{email}@provo.utah.gov"]
+    # set proxyAddresses and mail field in AD attributes
     email_dict={"proxyAddresses":email_proxies,"mail":f"{email}@provo.utah.gov"}
+    # add user to ciscoduosync
     emailGroup=adgroup.ADGroup.from_cn("ciscoduosync")
     try:
         userObject.update_attributes(email_dict)
         userObject.add_to_group(emailGroup)
     except:
-        messageBox.showerror("Error","Error updating email proxies and adding to email group\nCheck AD")
+        messageBox.showerror("Error","Error updating email proxies and adding to email group\nCheck AD to verify")
+        logging.error("Error updating email proxies and adding to email group\nCheck AD")
 
 # Function to update AD Object with details provided in ticket
 def update_ad_record():
     pythoncom.CoInitialize()
 
+    # get user input from fields
     ticketNumber = entry_ticket_number.get()
     email_status = needs_email_var.get()
     part_time = part_time_var.get()
