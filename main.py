@@ -74,7 +74,7 @@ def get_ticket_details(ticketNumber):
     # Verify the ticket was a New Hire ticket and set variables
     if data["ticket"]["summary"] != "Employee Hire" or "Full-Time Employee Hire":
         employee_pattern = r"Employee: (.+?) - (\d+)"
-        position_pattern = r"Position: P-\d*(?:\w*) (.*?)(?=\s\(|\s-\s)"
+        position_pattern = r"Position: P-\d*(?:\w*) (.*?)(?=\s\(|\s-\s| Requisition)"
         supervisor_pattern = r"Supervisor: (\w+ \w+)"
         
         employee_pattern2 = r"Name: (.+?) -"
